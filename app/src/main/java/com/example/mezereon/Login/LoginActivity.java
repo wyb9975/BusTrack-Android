@@ -97,6 +97,8 @@ public class LoginActivity extends AppCompatActivity {
             switch (message.what) {
                 case MESSAGETYPE_01:
                         EMClient.getInstance().login(hp.getString("PHONE","none"),hp.getString("PHONE","none"),new EMCallBack() {//回调
+
+
                                 @Override
                                 public void onSuccess() {
                                     EMClient.getInstance().groupManager().loadAllGroups();
