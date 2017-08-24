@@ -1,5 +1,6 @@
 package com.example.mezereon.Login;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.ActivityOptions;
@@ -7,6 +8,7 @@ import android.app.ProgressDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -25,6 +27,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Toast;
 
+import com.example.mezereon.Component.DaggerAppComponent;
 import com.example.mezereon.Home.HomeActivity;
 import com.example.mezereon.MyApp;
 import com.example.mezereon.R;
@@ -89,102 +92,26 @@ public class LoginActivity extends AppCompatActivity {
     private SharedPreferences.Editor editor;
     private ProgressDialog progressDialog = null;
     private AlertDialog alertDialog = null;
-    private static final int MESSAGETYPE_01 = 0x0001;
-    private static final int MESSAGETYPE_02 = 0x0002;
-    private Handler handler = new Handler() {
 
-        public void handleMessage(Message message) {
-            switch (message.what) {
-                case MESSAGETYPE_01:
-                        EMClient.getInstance().login(hp.getString("PHONE","none"),hp.getString("PHONE","none"),new EMCallBack() {//回调
-
-
-                                @Override
-                                public void onSuccess() {
-                                    EMClient.getInstance().groupManager().loadAllGroups();
-                                    EMClient.getInstance().chatManager().loadAllConversations();
-                                    progressDialog.dismiss(); //关闭进度条
-                                    getWindow().setExitTransition(new Explode());
-                                    intent.setClass(LoginActivity.this, HomeActivity.class);
-                                    startActivity(intent);
-                                    finish();
-
-                                }
-
-                                @Override
-                                public void onProgress(int progress, String status) {
-                                    Log.d("progress",progress+"");
-                                    //测试github用
-                                    Log.d("progress",progress+"");
-                                }
-
-                                @Override
-                                public void onError(int code, String message) {
-                                   //Toast.makeText(LoginActivity.this,"登陆服务器失败",Toast.LENGTH_SHORT).show();
-                                }
-                            });
-                    //刷新UI，显示数据，并关闭进度条
-                    break;
-                case MESSAGETYPE_02:
-                    showTheWayToRegist();
-                    break;
-
-            }
-        }
-    };
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().requestFeature(Window.FEATURE_CONTENT_TRANSITIONS);
         setContentView(R.layout.activity_login);
         progressDialog=new ProgressDialog(LoginActivity.this);
-
+        DaggerAppComponent.builder().build().inject(this);
+        final IsRegistService isRegistService = retrofit.create(IsRegistService.class);
         hp = this.getSharedPreferences("USERINFO", MODE_PRIVATE);
         editor = hp.edit();
-        //透明状态栏
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-        //透明导航栏
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
+        getPermission();
         ButterKnife.bind(this);
-
-        EMOptions options = new EMOptions();
-        //初始化
-        EMClient.getInstance().init(new MyApp(), options);
-        final IsRegistService isRegistService = retrofit.create(IsRegistService.class);
-
-        if(!hp.getString("PHONE","none").equals("none")){
-            intent.setClass(LoginActivity.this, HomeActivity.class);
-            startActivity(intent);
-            finish();
-        }
+        setTheStateBarAndInitEM();
+        judgeTheLoginState();
         RxView.clicks(btn_login).subscribe(new Action1<Void>() {
             @Override
             public void call(Void aVoid) {
-                Log.d("tag1",et_id.getText().equals("")+"");
-                Log.d("tag2",isMobileNO(et_id.getText().toString())+"");
                 if ((!et_id.getText().equals(""))&&isMobileNO(et_id.getText().toString())) {
-                    editor.putString("PHONE",et_id.getText().toString());
-                    editor.commit();
-                    progressDialog.setMessage("登陆中");
-                    progressDialog.show();
-//                    new Thread(new Runnable() {
-//                        @Override
-//                        public void run() {
-//                            isRegisted(et_id.getText().toString());
-//                        }
-//
-//                    }).start();
-                    Subscription subscription = isRegistService.isRegist(et_id.getText().toString())
-                            .subscribeOn(Schedulers.io())
-                            .observeOn(AndroidSchedulers.mainThread())
-                            .subscribe(new Action1<String>() {
-                                @Override
-                                public void call(String result) {
-                                    isRegisted(result);
-                                }
-                            });
-
-
+                    doBeforeLogin(isRegistService);
                 } else{
                     til.setErrorEnabled(true);
                     til.setError("请输入正确的手机号码");
@@ -195,7 +122,76 @@ public class LoginActivity extends AppCompatActivity {
 
     }
 
-    private void showTheWayToRegist() {
+    private void getPermission() {
+        //申请定位，网络，读取手机状态权限
+        PackageManager pm = getPackageManager();
+        boolean permission = (PackageManager.PERMISSION_GRANTED ==
+                pm.checkPermission("android.permission.READ_PHONE_STATE", "packageName"));
+        if (permission) {
+        }else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if(getBaseContext().checkSelfPermission(Manifest.permission.READ_PHONE_STATE) !=PackageManager.PERMISSION_GRANTED
+                        ||getBaseContext().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) !=PackageManager.PERMISSION_GRANTED
+                        ||getBaseContext().checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) !=PackageManager.PERMISSION_GRANTED) {
+
+                    // 申请一个（或多个）权限，并提供用于回调返回的获取码（用户定义)
+                    requestPermissions( new String[]{
+                            Manifest.permission.READ_PHONE_STATE ,Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.READ_EXTERNAL_STORAGE},100);
+
+                }
+            }
+        }
+    }
+
+    private void doBeforeLogin(IsRegistService isRegistService) {
+        editor.putString("PHONE",et_id.getText().toString());
+        editor.commit();
+        progressDialog.setMessage("登陆中");
+        progressDialog.show();
+        Subscription subscription = isRegistService.isRegist(et_id.getText().toString())
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(new Action1<String>() {
+                    @Override
+                    public void call(String result) {
+                        isRegisted(result);
+                    }});
+    }
+
+    private void setTheStateBarAndInitEM() {
+        //透明状态栏
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        //透明导航栏
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
+        //初始化EMClient
+        EMOptions options = new EMOptions();
+        EMClient.getInstance().init(new MyApp(), options);
+    }
+
+    private void judgeTheLoginState() {
+        if(!hp.getString("PHONE","none").equals("none")){
+            intent.setClass(LoginActivity.this, HomeActivity.class);
+            startActivity(intent);
+            finish();
+        }
+    }
+
+
+    private void isRegisted(String s) {
+        String result = s;
+//        try {
+//            result = API.isRegisterForHttpGet(s);
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+        if(result.equals("1")){
+            login();
+        }else{
+            turnToRegist();
+        }
+    }
+
+    private void turnToRegist() {
         progressDialog.dismiss();
         alertDialog=new AlertDialog.Builder(LoginActivity.this)
                 .setTitle("前往注册界面")
@@ -218,18 +214,32 @@ public class LoginActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void isRegisted(String s) {
-        String result = s;
-//        try {
-//            result = API.isRegisterForHttpGet(s);
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
-        if(result.equals("1")){
-            handler.sendEmptyMessage(MESSAGETYPE_01);
-        }else{
-            handler.sendEmptyMessage((MESSAGETYPE_02));
-        }
+    private void login() {
+        EMClient.getInstance().login(hp.getString("PHONE","none"),hp.getString("PHONE","none"),new EMCallBack() {//回调
+            @Override
+            public void onSuccess() {
+                closeDialogAndTurnToHome();
+            }
+            @Override
+            public void onProgress(int progress, String status) {
+                Log.d("progress",progress+"");
+            }
+            @Override
+            public void onError(int code, String message) {
+                Log.d("Error",message);
+            }
+        });
+    }
+
+
+    private void closeDialogAndTurnToHome() {
+        EMClient.getInstance().groupManager().loadAllGroups();
+        EMClient.getInstance().chatManager().loadAllConversations();
+        progressDialog.dismiss(); //关闭进度条
+        getWindow().setExitTransition(new Explode());
+        intent.setClass(LoginActivity.this, HomeActivity.class);
+        startActivity(intent);
+        finish();
     }
 
     /**
